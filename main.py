@@ -5,6 +5,8 @@ import numpy as np
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from urllib.parse import urlparse
+import whois  # <--- Domain Age check panna
+from datetime import datetime
 
 app = Flask(__name__)
 CORS(app)
@@ -17,12 +19,34 @@ try:
 except Exception as e:
     print(f"❌ Load Error: {e}")
 
-# 2. EXACT MATCH WITH YOUR COLAB FUNCTION
+# 2. Domain Age Logic
+def get_domain_age(url):
+    try:
+        # Hostname mattum edupom (e.g., google.com)
+        domain = urlparse(url).netloc
+        if not domain:
+            domain = url.split('/')[0]
+        
+        # Whois lookup
+        w = whois.whois(domain)
+        creation_date = w.creation_date
+        
+        # Sila neram list-ah varum (multiple registration dates)
+        if isinstance(creation_date, list):
+            creation_date = creation_date[0]
+            
+        if creation_date:
+            age_days = (datetime.now() - creation_date).days
+            return age_days
+        return None
+    except:
+        return None
+
+# 3. EXACT MATCH WITH YOUR COLAB FUNCTION
 def extract_95_accuracy_features(url):
     u = str(url).lower()
     hostname = urlparse(u).netloc
     
-    # Intha list unga Colab sequence-ai appadiyae follow pannudhu
     features = [
         len(u),                                         # 1. URL Length
         u.count('.'),                                   # 2. Dot Count
@@ -35,7 +59,7 @@ def extract_95_accuracy_features(url):
         u.count('//'),                                  # 9. Double Slash (Redirect)
         sum(c.isdigit() for c in u),                    # 10. Digit Count
         1 if re.search(r'\d+\.\d+\.\d+\.\d+', u) else 0, # 11. IP Address presence
-        len(hostname),                                  # 12. Hostname length (ITHU THAAN CHANGE!)
+        len(hostname),                                  # 12. Hostname length
         u.count('www'),                                 # 13. WWW count
         # 14. Suspicious Keywords Check
         1 if any(word in u for word in ['login', 'verify', 'update', 'bank', 'secure', 'signin']) else 0,
@@ -53,23 +77,29 @@ def predict():
         if not url:
             return jsonify({"error": "No URL provided"}), 400
 
-        # Features extract panni array-va mathuruvom
+        # 1. AI Model Prediction
         f_list = extract_95_accuracy_features(url)
         features = np.array([f_list])
-        
-        # Prediction
         prediction_idx = int(model.predict(features)[0])
         
-        # IMPORTANT: Unga model-la Index 0 = Phishing, Index 1 = Safe
-        # Oru velai re-deploy panniye results maarala na, inga 'safe' matrum 'phishing' labels-ai swap panni paarunga.
+        # Result logic (Index 0 = Phishing, Index 1 = Safe)
         result = "phishing" if prediction_idx == 0 else "safe"
 
-        print(f"DEBUG: URL={url} | Pred_Index={prediction_idx} | Result={result}")
+        # 2. Get Domain Age
+        age = get_domain_age(url)
+        
+        # 3. Generate Screenshot URL (Free API)
+        # Intha API URL-ai direct-ah Flutter Image.network-la use panni preview kaatalaam
+        screenshot = f"https://api.screenshotmachine.com/?key=FREE&url={url}&dimension=1024x768"
+
+        print(f"DEBUG: URL={url} | Pred={result} | Age={age}")
 
         return jsonify({
             "url": url,
             "prediction": result,
             "prediction_index": prediction_idx,
+            "domain_age_days": age,
+            "screenshot_url": screenshot,
             "status": "success"
         })
 
